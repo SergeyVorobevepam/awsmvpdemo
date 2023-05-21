@@ -16,3 +16,6 @@ The following diagram shows the main infrastructure of the project
 - Application load balancer distributes the load between services. Simple type - round robin.
 - Services can interact asynchronously with SQS queues.
 - Dynamo DB is used as an example of a NoSql database
+
+## Constraints
+- To provide access to SQS and Dynamo, you will need to create users in your account and use their access and sercet key for access. **Warning!** Do not store you credentials inside services, use can use **AWS System manager** for this purpose.
