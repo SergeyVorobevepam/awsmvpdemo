@@ -5,7 +5,7 @@ The infrastructure is described in cloudFormation templates.
 The services are written in Java + Spring.
 
 The following diagram shows the main infrastructure of the project
-![image](https://github.com/SergeyVorobevepam/awsmvpdemo/assets/134205710/43f90670-1b79-41cd-9021-7cfcbe62572e)
+![image](https://github.com/SergeyVorobevepam/awsmvpdemo/assets/134205710/da1f59d3-07e4-49fb-9c4b-185071ffc593)
 
 
 ## The major characteristics of the project
