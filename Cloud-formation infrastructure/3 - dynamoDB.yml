@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creating DynamoDB tables with CloudFormation
+Parameters:
+  EnvironmentName: 
+    Type: String
+    Default: vorobevmvp
+    Description: Name of the environment.
+  ReadCapacity:
+    Description: "The number of DB read units"
+    Type: Number
+    Default: '1'
+  WriteCapacity:
+    Description: "The number of DB write units"
+    Type: Number
+    Default: '1'
+
+Resources:
+  myTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: orders
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 
+          Ref: ReadCapacity
+        WriteCapacityUnits: 
+          Ref: WriteCapacity

@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Stage for creating complete network base 
+Parameters: 
+  EnvironmentName: 
+    Type: String
+    Default: vorobevmvp
+    Description: Name of the environment.
+
+Resources:
+  # VPC infrastructure with 2 public and 2 private subnets
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: '10.0.0.0/16'
+      Tags:
+      - Key: Name
+        Value: !Join [ '-', [!Ref EnvironmentName, Vpc] ] 
+
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: '10.0.0.0/24'
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: NameS
+        Value: !Join [ '-', [!Ref EnvironmentName, PublicSubnetOne] ]       
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: '10.0.1.0/24'
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value: !Join [ '-', [!Ref EnvironmentName, PublicSubnetTwo] ]       
+
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: '10.0.100.0/24'
+      Tags:
+      - Key: Name
+        Value: !Join [ '-', [!Ref EnvironmentName, PrivateSubnetOne] ]       
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: '10.0.101.0/24'
+      Tags:
+      - Key: Name
+        Value: !Join [ '-', [!Ref EnvironmentName, PrivateSubnetTwo] ]       
+
+  #Configure public subnets internet routing
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref 'VPC'
+      InternetGatewayId: !Ref 'InternetGateway'
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+      - Key: Name
+        Value: !Join [ '-', [!Ref EnvironmentName, PublicRouteTable] ]        
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'      
+      Tags:
+      - Key: Name
+        Value: !Join [ '-', [!Ref EnvironmentName, PrivateRouteTable] ]        
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref 'InternetGateway'
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetOne
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetTwo
+      RouteTableId: !Ref PrivateRouteTable
+  
+  #Configure NATGateway
+  NatGatewayOneAttachment:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+  NatGatewayOne:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayOneAttachment.AllocationId
+      SubnetId: !Ref PublicSubnetOne      
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable        
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayOne       
+
+  #Configure load balancer
+  PublicLoadBalancerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the public facing load balancer
+      VpcId: !Ref 'VPC'
+      SecurityGroupIngress:
+          # Allow access to ALB from anywhere
+          - CidrIp: 0.0.0.0/0
+            IpProtocol: -1
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+      Subnets:
+        - !Ref PublicSubnetOne 
+        - !Ref PublicSubnetTwo
+      SecurityGroups: [!Ref 'PublicLoadBalancerSG']
+  SimpleTargetGroupPublic:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'drop-1']]
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VPC'
+  PublicLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - PublicLoadBalancer
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'SimpleTargetGroupPublic'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 80
+      Protocol: HTTP      
+
+Outputs:
+  VPCId:
+    Description: VPC link
+    Value: !Ref 'VPC'
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'VPCId' ] ]
+  PublicSubnetOne:
+    Description: Public subnet one
+    Value: !Ref 'PublicSubnetOne'
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'PublicSubnetOne' ] ]
+  PublicSubnetTwo:
+    Description: Public subnet two
+    Value: !Ref 'PublicSubnetTwo'
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'PublicSubnetTwo' ] ]
+  PrivateSubnetOne:
+    Description: Private subnet one
+    Value: !Ref 'PrivateSubnetOne'
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'PrivateSubnetOne' ] ]
+  PrivateSubnetTwo:
+    Description: Private subnet two
+    Value: !Ref 'PrivateSubnetTwo'
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'PrivateSubnetTwo' ] ]
+  PublicRouteTable:
+    Description: Public routing table
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'PublicRouteTable' ] ]    
+  PrivateRouteTable:
+    Description: Private routing table
+    Value: !Ref PrivateRouteTable
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'PrivateRouteTable' ] ]
+  ExternalUrl:
+    Description: The url of the external load balancer
+    Value: !Join ['', ['http://', !GetAtt 'PublicLoadBalancer.DNSName']]
+    Export:
+      Name: !Join [ ':', [ !Ref EnvironmentName, 'ExternalUrl' ] ]     
+  PublicLoadBalancerListener:
+    Description: PublicLoadBalancerListener
+    Value: !Ref 'PublicLoadBalancerListener'
+    Export:
+      Name: !Join [ ':', [ !Ref 'EnvironmentName', 'PublicLoadBalancerListener' ] ]        
+  PublicLoadBalancerSG:
+    Description: The ARN of the Publiv Loabbalancer SG
+    Value: !Ref 'PublicLoadBalancerSG'
+    Export:
+      Name: !Join [':', [!Ref 'EnvironmentName', 'PublicLoadBalancerSG']]         

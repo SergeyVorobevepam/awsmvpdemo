@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Standard queue
+Parameters:
+  EnvironmentName: 
+    Type: String
+    Default: vorobevmvp
+    Description: Name of the environment.
+  DelaySeconds:
+    Description: "The message delay in seconds"
+    Type: Number
+    Default: '5'
+  MaximumMessageSize:
+    Type: Number
+    Description: "Message limit in bytes"
+    Default: '262144'
+  MessageRetentionPeriod:
+    Description: "Message retain in seconds"
+    Type: Number
+    Default: '345600'
+  ReceiveMessageWaitTimeSeconds:
+    Description: "Specifies the duration, in seconds, that the ReceiveMessage action call waits until a message is in the queue in order to include it in the response"
+    Type: Number
+    Default: '0'
+  UsedeadletterQueue:
+    Description: "A dead-letter queue."
+    Type: String
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Default: 'false'
+  VisibilityTimeout:
+    Description: "This should be longer than the time it would take to process and delete a message"
+    Type: Number
+    Default: '5'
+    
+Mappings: {}
+
+Conditions:
+  CreateDeadLetterQueue:
+    Fn::Equals:
+    - Ref: UsedeadletterQueue
+    - 'true'
+    
+Resources:
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName : db-queue
+      DelaySeconds:
+        Ref: DelaySeconds
+      MaximumMessageSize:
+        Ref: MaximumMessageSize
+      MessageRetentionPeriod:
+        Ref: MessageRetentionPeriod
+      ReceiveMessageWaitTimeSeconds:
+        Ref: ReceiveMessageWaitTimeSeconds
+      RedrivePolicy:
+        Fn::If:
+        - CreateDeadLetterQueue
+        - deadLetterTargetArn:
+            Fn::GetAtt:
+            - MyDeadLetterQueue
+            - Arn
+          maxReceiveCount: 5
+        - Ref: AWS::NoValue
+      VisibilityTimeout:
+        Ref: VisibilityTimeout
+  MyDeadLetterQueue:
+    Condition: CreateDeadLetterQueue
+    Type: AWS::SQS::Queue

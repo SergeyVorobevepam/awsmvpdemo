@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: database-service
+Parameters:
+  EnvironmentName: 
+    Type: String
+    Default: vorobevmvp
+    Description: Name of the environment.
+  ServiceName:
+    Type: String
+    Default: "database-service"
+    Description: Service name
+  ImageUrl:
+    Type: String
+    Default: public.ecr.aws/p0l0p2p5/sergeyvorobev/database-service:latest
+    Description: The url of a docker image
+  ContainerPort:
+    Type: Number
+    Default: 8080
+    Description: API port
+  TaskCpu:
+    Type: Number
+    Default: 256
+    Description: CPU capacity. 1024 is 1 CPU
+  TaskMemory:
+    Type: Number
+    Default: 512
+    Description: Container memory capacity
+  Path:
+    Type: String
+    Default: "/api/v1/databaseservice/*"
+    Description: A path on the public load balancer.
+  Priority:
+    Type: Number
+    Default: 2
+    Description: The priority for the routing rule.
+  DesiredCount:
+    Type: Number
+    Default: 2
+    Description: The number or desired copies of the service
+  Role:
+    Type: String
+    Default: ""
+    Description: (Optional) An IAM role to give the service's containers if the code within needs to
+                 access other AWS resources like S3 buckets, DynamoDB tables, etc
+
+Conditions:
+  HasCustomRole: !Not [ !Equals [!Ref 'Role', ''] ]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['-', [!Ref 'EnvironmentName', 'service', !Ref 'ServiceName']]
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref 'ServiceName'
+      Cpu: !Ref 'TaskCpu'
+      Memory: !Ref 'TaskMemory'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'ECSTaskExecutionRole']]
+      ContainerDefinitions:
+        - Name: !Ref 'ServiceName'
+          Cpu: !Ref 'TaskCpu'
+          Memory: !Ref 'TaskMemory'
+          Image: !Ref 'ImageUrl'
+          Environment:
+            - Name: SQS_ACCESS_KEY
+              Value: arn:aws:ssm:us-east-1:139665684873:parameter/sqs-access-key
+            - Name: SQS_SECRET_KEY
+              Value: arn:aws:ssm:us-east-1:139665684873:parameter/sqs-secret-key
+            - Name: DYNAMO_ACCESS_KEY
+              Value: arn:aws:ssm:us-east-1:139665684873:parameter/dynamo-access-key
+            - Name: DYNAMO_SECRET_KEY
+              Value: arn:aws:ssm:us-east-1:139665684873:parameter/dynamo-secret-key
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Join ['-', [!Ref 'EnvironmentName', 'service', !Ref 'ServiceName']]
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Ref 'ServiceName'
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerRule
+    Properties:
+      ServiceName: !Ref 'ServiceName'
+      Cluster:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'ClusterName']]
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 75
+      DesiredCount: !Ref 'DesiredCount'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'EnvironmentName', 'FargateContainerSecurityGroup']]
+          Subnets:
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'EnvironmentName', 'PrivateSubnetOne']]
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'EnvironmentName', 'PrivateSubnetTwo']]
+      TaskDefinition: !Ref 'TaskDefinition'
+      Role:
+        Fn::If:
+          - 'HasCustomRole'
+          - !Ref 'Role'
+          - !Ref "AWS::NoValue"
+      LoadBalancers:
+        - ContainerName: !Ref 'ServiceName'
+          ContainerPort: !Ref 'ContainerPort'
+          TargetGroupArn: !Ref 'TargetGroup'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /api/v1/databaseservice/health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: !Ref 'ServiceName'
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: false
+      VpcId:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'VPCId']]
+
+  LoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Type: 'forward'
+      Conditions:
+        - Field: path-pattern
+          Values: [!Ref 'Path']
+      ListenerArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'PublicLoadBalancerListener']]
+      Priority: !Ref 'Priority'
